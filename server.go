@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -24,14 +25,20 @@ import (
 //	phone → pc  {"t":"hello","id","key"}                every later connect
 //	pc → phone  {"t":"welcome","pc"}  or  {"t":"error","msg"}
 //	phone → pc  {"t":"ping"}          pc → phone {"t":"pong"}
+//	phone → pc  {"t":"file","name","size"} + size raw bytes   pc → phone {"t":"saved","name"}
+//
+// File transfers use their own connection (hello with "purpose":"files") so a big
+// upload never delays the pings on the main link.
 type msg struct {
-	T     string `json:"t"`
-	Token string `json:"token,omitempty"`
-	ID    string `json:"id,omitempty"`
-	Key   string `json:"key,omitempty"`
-	Name  string `json:"name,omitempty"`
-	PC    string `json:"pc,omitempty"`
-	Msg   string `json:"msg,omitempty"`
+	T       string `json:"t"`
+	Token   string `json:"token,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Key     string `json:"key,omitempty"`
+	Name    string `json:"name,omitempty"`
+	PC      string `json:"pc,omitempty"`
+	Msg     string `json:"msg,omitempty"`
+	Purpose string `json:"purpose,omitempty"`
+	Size    int64  `json:"size,omitempty"`
 }
 
 const (
@@ -121,15 +128,11 @@ func (s *server) takeToken(t string) bool {
 
 func (s *server) handle(c net.Conn) {
 	defer c.Close()
-	r := bufio.NewScanner(c)
-	r.Buffer(make([]byte, 4096), maxLine)
+	r := bufio.NewReaderSize(c, maxLine)
 	enc := json.NewEncoder(c)
 	c.SetReadDeadline(time.Now().Add(15 * time.Second))
-	if !r.Scan() {
-		return
-	}
 	var first msg
-	if json.Unmarshal(r.Bytes(), &first) != nil || first.ID == "" || first.Key == "" {
+	if readMsg(r, &first) != nil || first.ID == "" || first.Key == "" {
 		return
 	}
 
@@ -157,6 +160,7 @@ func (s *server) handle(c net.Conn) {
 			enc.Encode(msg{T: "error", Msg: "unpaired"})
 			return
 		}
+		first.Name = p.Name
 	default:
 		return
 	}
@@ -164,22 +168,48 @@ func (s *server) handle(c net.Conn) {
 	if enc.Encode(msg{T: "welcome", PC: s.pcName}) != nil {
 		return
 	}
-	s.markOnline(first.ID, c)
-	defer s.markOffline(first.ID, c)
+	if first.Purpose != "files" {
+		s.markOnline(first.ID, c)
+		defer s.markOffline(first.ID, c)
+	}
 
 	for {
 		c.SetReadDeadline(time.Now().Add(idleTimeout))
-		if !r.Scan() {
+		var m msg
+		if err := readMsg(r, &m); err != nil {
+			if errors.Is(err, errBadMsg) {
+				continue
+			}
 			return
 		}
-		var m msg
-		if json.Unmarshal(r.Bytes(), &m) != nil {
-			continue
-		}
-		if m.T == "ping" {
+		switch m.T {
+		case "ping":
 			enc.Encode(msg{T: "pong"})
+		case "file":
+			c.SetReadDeadline(time.Time{}) // big files take a while; the phone closes on failure
+			name, err := receiveFile(r, m.Name, m.Size, first.Name)
+			if err != nil {
+				log.Printf("file %q: %v", m.Name, err)
+				enc.Encode(msg{T: "error", Msg: "The PC couldn't save " + m.Name + "."})
+				return
+			}
+			enc.Encode(msg{T: "saved", Name: name})
 		}
 	}
+}
+
+var errBadMsg = errors.New("not a message")
+
+// readMsg reads one JSON line. A line longer than the buffer ends the connection.
+func readMsg(r *bufio.Reader, m *msg) error {
+	line, err := r.ReadSlice('\n')
+	if err != nil {
+		return err
+	}
+	if json.Unmarshal(line, m) != nil {
+		return errBadMsg
+	}
+	return nil
 }
 
 // markOnline marks a phone connected; a newer connection from the same phone replaces the old one.
