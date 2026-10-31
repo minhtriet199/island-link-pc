@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,27 +39,106 @@ func (s *server) listenControl() error {
 	return nil
 }
 
+// islandConn is one open control connection. After "subscribe" it also gets {"ev":...} lines.
+type islandConn struct {
+	conn net.Conn
+	mu   sync.Mutex
+	enc  *json.Encoder
+}
+
+func (c *islandConn) send(v any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	return c.enc.Encode(v)
+}
+
+// control serves one client. The CLI sends one line; Island keeps the connection and sends many.
 func (s *server) control(c net.Conn) {
 	defer c.Close()
-	c.SetDeadline(time.Now().Add(5 * time.Second))
-	line, err := bufio.NewReader(c).ReadString('\n')
-	if err != nil {
-		return
-	}
-	enc := json.NewEncoder(c)
-	switch strings.TrimSpace(line) {
-	case "pair":
-		uri, exp, err := s.newPairing()
+	ic := &islandConn{conn: c, enc: json.NewEncoder(c)}
+	defer func() {
+		s.mu.Lock()
+		delete(s.islands, ic)
+		s.mu.Unlock()
+	}()
+	r := bufio.NewReaderSize(c, maxLine)
+	for {
+		s.mu.Lock()
+		subscribed := s.islands[ic]
+		s.mu.Unlock()
+		if subscribed {
+			c.SetReadDeadline(time.Time{})
+		} else {
+			c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		}
+		line, err := r.ReadString('\n')
 		if err != nil {
-			enc.Encode(map[string]string{"error": err.Error()})
 			return
 		}
-		enc.Encode(map[string]any{"uri": uri, "expires": exp.Unix()})
-	case "status":
-		enc.Encode(s.snapshot())
-	default:
-		enc.Encode(map[string]string{"error": "unknown command"})
+		cmd, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
+		switch cmd {
+		case "subscribe":
+			s.mu.Lock()
+			s.islands[ic] = true
+			s.mu.Unlock()
+			ic.send(s.stateEvent())
+		case "pair":
+			uri, exp, err := s.newPairing()
+			if err != nil {
+				ic.send(map[string]any{"ev": "pair", "error": err.Error()})
+				continue
+			}
+			ic.send(map[string]any{"ev": "pair", "uri": uri, "expires": exp.Unix(), "qr": writeQR(uri)})
+		case "status":
+			ic.send(s.snapshot())
+		case "dl": // Download mode state from Island, passed on to the phones as it is
+			if json.Valid([]byte(arg)) {
+				s.setDownload(arg)
+			}
+		case "forget":
+			s.forget(arg)
+		case "terminal": // "terminal 1" / "terminal 0": may the phone open a terminal?
+			s.setTerminal(arg == "1")
+		case "term-close":
+			s.closeTerm()
+		default:
+			ic.send(map[string]string{"ev": "error", "error": "unknown command"})
+		}
 	}
+}
+
+// stateChanged tells Island.
+func (s *server) stateChanged() { s.toIsland(s.stateEvent()) }
+
+func (s *server) stateEvent() any {
+	return struct {
+		Ev string `json:"ev"`
+		state
+	}{"state", s.snapshot()}
+}
+
+// toIsland sends an event to every open Island; false = Island isn't running.
+func (s *server) toIsland(v any) bool {
+	s.mu.Lock()
+	list := make([]*islandConn, 0, len(s.islands))
+	for c := range s.islands {
+		list = append(list, c)
+	}
+	s.mu.Unlock()
+	for _, c := range list {
+		c.send(v)
+	}
+	return len(list) > 0
+}
+
+// writeQR renders the pairing QR for Island; "" when qrencode is missing.
+func writeQR(uri string) string {
+	path := filepath.Join(runDir(), "pair-qr.png")
+	if exec.Command("qrencode", "-o", path, "-s", "10", "-m", "2", uri).Run() != nil {
+		return ""
+	}
+	return path
 }
 
 // ask sends one command to the running link and decodes the reply into out.

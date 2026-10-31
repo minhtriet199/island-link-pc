@@ -1,6 +1,6 @@
 // island-link-pc: the PC side of Island Link (talks to the island-link-android phone app).
 //
-//	island-link-pc serve    run the link (Island starts this at login)
+//	island-link-pc serve    run the link (island-link.service starts it at login)
 //	island-link-pc pair     make a one-time pairing code and show it as a QR
 //	island-link-pc status   print the link state as JSON
 package main
@@ -10,7 +10,7 @@ import (
 	"os"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 // port the phone connects to (TLS). Same Wi-Fi only for now.
 const port = 47800

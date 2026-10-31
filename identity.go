@@ -26,7 +26,7 @@ func dataDir() string {
 	return filepath.Join(base, "island-link")
 }
 
-// runDir holds live files Island reads: state.json and the control socket.
+// runDir holds live files: the control socket, the QR picture, the terminal's socket.
 func runDir() string {
 	base := os.Getenv("XDG_RUNTIME_DIR")
 	if base == "" {

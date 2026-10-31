@@ -20,7 +20,17 @@ func testServer(t *testing.T) (*server, *tls.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &server{pcName: "TestPC", fp: fp, phones: loadPhones(), online: map[string]*session{}}
+	s := newServer("TestPC", fp)
+	return s, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
+}
+
+// testTLS hands out a TLS config for a server made elsewhere in the test.
+func testTLS(t *testing.T, s *server) (*server, *tls.Config) {
+	t.Helper()
+	cert, _, err := loadIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return s, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
 }
 

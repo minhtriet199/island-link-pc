@@ -18,6 +18,26 @@ type phone struct {
 	Paired  int64  `json:"paired"`
 }
 
+// config holds the owner's choices. The terminal stays off until they turn it on in Island.
+type config struct {
+	Terminal bool `json:"terminal"`
+}
+
+func configFile() string { return filepath.Join(dataDir(), "config.json") }
+
+func loadConfig() config {
+	var c config
+	if b, err := os.ReadFile(configFile()); err == nil {
+		json.Unmarshal(b, &c)
+	}
+	return c
+}
+
+func saveConfig(c config) error {
+	b, _ := json.MarshalIndent(c, "", "  ")
+	return writeAtomic(configFile(), b, 0o600)
+}
+
 func phonesFile() string { return filepath.Join(dataDir(), "phones.json") }
 
 func loadPhones() map[string]phone {

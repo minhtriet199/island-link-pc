@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -87,17 +86,9 @@ func freeName(dir, name string) string {
 }
 
 // notifyNewFile is swapped out in tests so they never pop bubbles on the real desktop.
-var notifyNewFile = notify
-
-// notify shows an Island bubble for the new file (no-op without notify-send).
-func notify(from, name string) {
+var notifyNewFile = func(from, name string) {
 	if from == "" {
 		from = "your phone"
 	}
-	if bin, err := exec.LookPath("notify-send"); err == nil {
-		cmd := exec.Command(bin, "-a", "Island Link", "-i", "folder-download", "From "+from, name)
-		if cmd.Start() == nil {
-			go cmd.Wait() // reap it, no zombie
-		}
-	}
+	spawn("notify-send", "-a", "Island Link", "-i", "folder-download", "--", "From "+from, name)
 }

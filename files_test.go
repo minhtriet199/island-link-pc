@@ -10,8 +10,9 @@ func TestFileTransfer(t *testing.T) {
 	s, cfg := testServer(t)
 	t.Setenv("XDG_DOWNLOAD_DIR", t.TempDir())
 	var bubbles []string
+	old := notifyNewFile
 	notifyNewFile = func(from, name string) { bubbles = append(bubbles, from+": "+name) }
-	t.Cleanup(func() { notifyNewFile = notify })
+	t.Cleanup(func() { notifyNewFile = old })
 	s.phones["p"] = newPhone("p", "Pixel 9", "k")
 
 	enc, r, c := dial(t, s, cfg)
