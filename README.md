@@ -14,6 +14,16 @@ PC side of **Island Link**: a small Go helper that links the Island shell (Hyprl
 Light in the background (about 12 MB, no timers while idle); Island is the UI, under Settings → Phone Link.
 Same Wi-Fi only for now.
 
+## In Island
+
+<p>
+  <img src="docs/screenshots/phone-link.png" width="300" alt="Phone Link page with the pairing code, blurred here">
+</p>
+
+While the phone has a terminal open, the top bar shows this. Click it to close the window:
+
+<img src="docs/screenshots/terminal-pill.png" width="243" alt="Phone is typing in kitty pill">
+
 ## Install
 
 ```sh
