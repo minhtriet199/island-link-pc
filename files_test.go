@@ -24,16 +24,23 @@ func TestFileTransfer(t *testing.T) {
 		t.Fatal("a file connection must not replace the phone's main session")
 	}
 
-	for range 2 { // same name twice → the second gets "(2)"
-		enc.Encode(msg{T: "file", Name: "shot.png", Size: 5})
-		c.Write([]byte("hello"))
+	// same name: identical content is kept once, different content gets "(2)"
+	for _, body := range []string{"hello", "hello", "other"} {
+		enc.Encode(msg{T: "file", Name: "shot.png", Size: int64(len(body))})
+		c.Write([]byte(body))
 		reply(t, r)
 	}
-	for _, name := range []string{"shot.png", "shot (2).png"} {
+	for name, want := range map[string]string{"shot.png": "hello", "shot (2).png": "other"} {
 		b, err := os.ReadFile(filepath.Join(inboxDir(), name))
-		if err != nil || string(b) != "hello" {
+		if err != nil || string(b) != want {
 			t.Fatalf("%s: %q %v", name, b, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(inboxDir(), "shot (3).png")); err == nil {
+		t.Fatal("the repeated file was saved again")
+	}
+	if left, _ := filepath.Glob(filepath.Join(inboxDir(), ".*.part")); len(left) != 0 {
+		t.Fatalf("temp files left: %v", left)
 	}
 	if len(bubbles) != 2 || bubbles[0] != "Pixel 9: shot.png" {
 		t.Fatalf("bubbles: %v", bubbles)

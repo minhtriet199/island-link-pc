@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -33,25 +34,79 @@ func receiveFile(r *bufio.Reader, name string, size int64, from string) (string,
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	final := freeName(dir, cleanName(name))
-	part := filepath.Join(dir, "."+final+".part")
-	f, err := os.OpenFile(part, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	base := cleanName(name)
+	f, err := os.CreateTemp(dir, "."+base+".*.part")
 	if err != nil {
 		return "", err
 	}
+	part := f.Name()
 	_, err = io.CopyN(f, r, size)
 	if cerr := f.Close(); err == nil {
 		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(part, filepath.Join(dir, final))
 	}
 	if err != nil {
 		os.Remove(part)
 		return "", err
 	}
+	// the same file sent again (e.g. shared twice from the phone): keep the one already here, no " (2)" copy
+	if same := sameFile(dir, base, part); same != "" {
+		os.Remove(part)
+		return same, nil
+	}
+	final := freeName(dir, base)
+	if err := os.Rename(part, filepath.Join(dir, final)); err != nil {
+		os.Remove(part)
+		return "", err
+	}
 	notifyNewFile(from, final)
 	return final, nil
+}
+
+// sameFile is the name of a file already in dir, "name" or "name (N)", with exactly part's content, or "".
+func sameFile(dir, name, part string) string {
+	want, err := os.Stat(part)
+	if err != nil {
+		return ""
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 1; ; i++ {
+		try := name
+		if i > 1 {
+			try = fmt.Sprintf("%s (%d)%s", stem, i, ext)
+		}
+		st, err := os.Lstat(filepath.Join(dir, try))
+		if errors.Is(err, os.ErrNotExist) {
+			return ""
+		}
+		if err == nil && st.Mode().IsRegular() && st.Size() == want.Size() && sameBytes(filepath.Join(dir, try), part) {
+			return try
+		}
+	}
+}
+
+func sameBytes(a, b string) bool {
+	fa, err := os.Open(a)
+	if err != nil {
+		return false
+	}
+	defer fa.Close()
+	fb, err := os.Open(b)
+	if err != nil {
+		return false
+	}
+	defer fb.Close()
+	ba, bb := make([]byte, 64<<10), make([]byte, 64<<10)
+	for {
+		na, ea := io.ReadFull(fa, ba)
+		nb, eb := io.ReadFull(fb, bb)
+		if na != nb || !bytes.Equal(ba[:na], bb[:nb]) {
+			return false
+		}
+		if ea != nil || eb != nil { // same size (checked first), so both end together
+			return ea != nil && eb != nil
+		}
+	}
 }
 
 // cleanName keeps only the base name and drops characters that cause trouble in paths.
