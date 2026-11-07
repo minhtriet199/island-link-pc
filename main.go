@@ -10,7 +10,7 @@ import (
 	"os"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 // port the phone connects to (TLS). Same Wi-Fi only for now.
 const port = 47800

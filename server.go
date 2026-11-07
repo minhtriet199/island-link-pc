@@ -26,6 +26,7 @@ import (
 //	pc → phone  {"t":"welcome","pc","terminal"}  or  {"t":"error","msg"}
 //	both ways   {"t":"ping"} → {"t":"pong"}  the PC starts it: a packet wakes a dozing phone, a timer in it would not
 //	phone → pc  {"t":"file","name","size"} + size raw bytes   pc → phone {"t":"saved","name"}
+//	pc → phone  {"t":"bye"} and a UDP knock: see wake.go
 //
 // Everything else on the main link (features.go): notifications, battery, controls, remote input,
 // clipboard, terminal. File transfers use their own connection (hello with "purpose":"files") so a big
@@ -126,6 +127,9 @@ func serve() error {
 		return fmt.Errorf("control socket: %w", err)
 	}
 	log.Printf("listening on :%d (fingerprint %s…)", port, fp[:12])
+	go s.byeOnStop()
+	go s.watchWake(15 * time.Second)
+	go s.knockAll("started")
 	for {
 		c, err := ln.Accept()
 		if err != nil {
@@ -204,6 +208,7 @@ func (s *server) handle(c net.Conn) {
 			return
 		}
 		first.Name = p.Name
+		s.noteAddr(first.ID, c.RemoteAddr())
 	default:
 		return
 	}

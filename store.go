@@ -16,6 +16,7 @@ type phone struct {
 	Name    string `json:"name"`
 	KeyHash string `json:"key_hash"`
 	Paired  int64  `json:"paired"`
+	Addr    string `json:"addr,omitempty"` // where it last connected from: knocks go here (wake.go)
 }
 
 // config holds the owner's choices. The terminal stays off until they turn it on in Island.
